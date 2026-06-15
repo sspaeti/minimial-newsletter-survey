@@ -98,23 +98,44 @@ Healthcheck on `/healthz` should turn green within ~30s after that.
 
 ```sh
 export SURVEY_QUACK_TOKEN='<paste the token>'
-export RAILWAY_QUACK_HOST='tcp-proxy.proxy.rlwy.net'
+export RAILWAY_QUACK_HOST='thomas.proxy.rlwy.net'    # whatever your TCP Proxy hostname is
 export RAILWAY_QUACK_PORT='38712'                    # from step 5
 
 make railway-duckdb-connect
 ```
 
-Then:
+This drops you into a local duckdb with two helpers pre-defined:
+
+- `remote_votes` — a view over the remote `votes` table (full snapshot fetched per query).
+- `rq(sql)` — table macro that runs arbitrary SQL on the remote.
 
 ```sql
-FROM s.votes ORDER BY ts DESC LIMIT 20;
+-- Last 20 votes
+FROM remote_votes ORDER BY ts DESC LIMIT 20;
 
--- Tally per newsletter
-SELECT survey_id, answer, count(*) AS votes
-FROM s.votes
-GROUP BY ALL
-ORDER BY survey_id DESC, votes DESC;
+-- One newsletter's tally (fetched remote, filtered locally)
+FROM remote_votes WHERE survey_id = '2026-06-04';
+
+-- Aggregate on the server side, return small result
+FROM rq('SELECT survey_id, answer, count(*) AS n
+         FROM votes
+         GROUP BY ALL
+         ORDER BY survey_id DESC, n DESC');
 ```
+
+> [!NOTE]
+> Why not `ATTACH 'quack:...' AS s`? The quack extension build in DuckDB 1.5.3 (`extension_version 1693647`) has a bug: ATTACH errors with `Binder Error: Catalog "s" does not exist!` even with valid token + DISABLE_SSL. `quack_query` works fine, so the Makefile target wraps it in a macro + view. Revisit when the next quack release lands.
+
+### One-shot summary: `make survey-result`
+
+Skip the interactive prompt entirely. Same env vars (`SURVEY_QUACK_TOKEN`, `RAILWAY_QUACK_HOST`, `RAILWAY_QUACK_PORT`):
+
+```sh
+make survey-result                          # every survey, per-answer bars
+make survey-result SURVEY_ID=2026-06-04     # just that newsletter
+```
+
+Bars scale to the top answer within each survey, so within-newsletter proportions are visible at a glance.
 
 ## Smoke test the HTTP side
 

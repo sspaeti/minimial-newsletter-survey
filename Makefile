@@ -10,7 +10,7 @@ DUCKDB_VER ?= 1.5.3
 BUILD_FLAGS := -tags=duckdb_use_lib
 
 .PHONY: test fmt vet sync build deploy logs status query token duckdb-connect push-installer install-on-server smoke help \
-        railway-token railway-docker-build railway-docker-run railway-duckdb-connect
+        railway-token railway-docker-build railway-docker-run railway-duckdb-connect survey-result
 
 SURVEY_HOST ?= survey.sspaeti.duckdns.org
 QUACK_HOST  ?= quack.sspaeti.duckdns.org
@@ -38,6 +38,9 @@ help:
 	@echo "  railway-duckdb-connect   - duckdb attached to Railway's TCP Proxy"
 	@echo "                             (needs RAILWAY_QUACK_HOST, RAILWAY_QUACK_PORT,"
 	@echo "                              SURVEY_QUACK_TOKEN env vars)"
+	@echo "  survey-result            - one-shot tally with bar chart of all surveys"
+	@echo "                             (same env vars as railway-duckdb-connect)"
+	@echo "                             pass SURVEY_ID=<id> for a single-survey detail view"
 	@echo ""
 	@echo "Server target (run on FreeBSD as root, after 'ssh $(HOST)' && 'su root'):"
 	@echo "  install-on-server - one-shot setup: pkg deps, DuckDB $(DUCKDB_VER) build,"
@@ -124,7 +127,11 @@ duckdb-connect:
 	    exit 1; \
 	fi
 	@tmp=$$(mktemp) && trap "rm -f $$tmp" EXIT INT TERM HUP && \
-	  printf "INSTALL quack;\nLOAD quack;\nATTACH 'quack:%s' AS s (TYPE QUACK, TOKEN '%s');\n.echo on\n.echo \"\\\\nConnected. Try:  FROM s.votes ORDER BY ts DESC LIMIT 10;\\\\n\"\n.echo off\n" "$(QUACK_HOST)" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
+	  printf "INSTALL quack;\nLOAD quack;\nATTACH 'quack:%s' AS s (TOKEN '%s');\n" \
+	    "$(QUACK_HOST)" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
+	  echo "" && \
+	  echo "Connected. Try:  FROM s.votes ORDER BY ts DESC LIMIT 10;" && \
+	  echo "" && \
 	  duckdb -init "$$tmp"
 
 # End-to-end smoke test from the laptop. Uses HEAD on /survey/* (server returns
@@ -172,8 +179,18 @@ railway-docker-run:
 	    -v survey-data:/var/db/survey \
 	    $(RAILWAY_IMAGE)
 
-# Same idea as duckdb-connect but for Railway's TCP Proxy (host:port instead
-# of a custom DNS name). Token goes via mktemp init file, not argv.
+# Open local duckdb with helpers pre-defined for the remote Quack server.
+#
+# ATTACH 'quack:...' is broken in the quack extension build shipped with
+# DuckDB 1.5.3 (Binder Error: Catalog "x" does not exist on a fresh ATTACH).
+# quack_query() works fine, so we wrap it in a macro + view:
+#
+#   FROM remote_votes;                          -- whole table
+#   FROM rq('SELECT survey_id, count(*)         -- arbitrary remote SQL
+#           FROM votes GROUP BY ALL');
+#
+# Each call fetches a fresh snapshot from the server. Fine for the vote
+# volumes this app handles.
 railway-duckdb-connect:
 	@command -v duckdb >/dev/null || { echo "error: duckdb CLI not on PATH (install duckdb locally first)" >&2; exit 1; }
 	@if [ -z "$$SURVEY_QUACK_TOKEN" ] || [ -z "$$RAILWAY_QUACK_HOST" ] || [ -z "$$RAILWAY_QUACK_PORT" ]; then \
@@ -182,6 +199,43 @@ railway-duckdb-connect:
 	    exit 1; \
 	fi
 	@tmp=$$(mktemp) && trap "rm -f $$tmp" EXIT INT TERM HUP && \
-	  printf "INSTALL quack;\nLOAD quack;\nATTACH 'quack:%s:%s' AS s (TOKEN '%s', DISABLE_SSL true);\n.echo on\n.echo \"\\\\nConnected. Try:  FROM s.votes ORDER BY ts DESC LIMIT 10;\\\\n\"\n.echo off\n" \
+	  printf "INSTALL quack;\nLOAD quack;\nCREATE OR REPLACE MACRO rq(sql) AS TABLE (FROM quack_query('quack:%s:%s', sql, token => '%s', disable_ssl => true));\nCREATE OR REPLACE VIEW remote_votes AS FROM rq('FROM votes');\n" \
 	    "$$RAILWAY_QUACK_HOST" "$$RAILWAY_QUACK_PORT" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
+	  echo "" && \
+	  echo "Connected via quack_query (ATTACH is broken in quack 1.5.3)." && \
+	  echo "Try:" && \
+	  echo "  FROM remote_votes;" && \
+	  echo "  FROM remote_votes WHERE survey_id = '2026-06-04';" && \
+	  echo "  FROM rq('SELECT survey_id, answer, count(*) FROM votes GROUP BY ALL');" && \
+	  echo "" && \
 	  duckdb -init "$$tmp"
+
+# One-shot tally with ascii bar chart.
+#
+#   make survey-result                          # all surveys, bars relative to each survey's top answer
+#   make survey-result SURVEY_ID=2026-06-04     # one survey only, bars relative to its top answer
+#
+# Same env vars as railway-duckdb-connect: SURVEY_QUACK_TOKEN,
+# RAILWAY_QUACK_HOST, RAILWAY_QUACK_PORT. SURVEY_ID is validated against the
+# same slug regex the server uses, so we can interpolate it safely.
+SURVEY_ID ?=
+
+survey-result:
+	@command -v duckdb >/dev/null || { echo "error: duckdb CLI not on PATH (install duckdb locally first)" >&2; exit 1; }
+	@if [ -z "$$SURVEY_QUACK_TOKEN" ] || [ -z "$$RAILWAY_QUACK_HOST" ] || [ -z "$$RAILWAY_QUACK_PORT" ]; then \
+	    echo "error: need SURVEY_QUACK_TOKEN, RAILWAY_QUACK_HOST, RAILWAY_QUACK_PORT" >&2; \
+	    echo "       see docs/install-railway.md" >&2; \
+	    exit 1; \
+	fi
+	@if [ -n "$(SURVEY_ID)" ] && ! echo "$(SURVEY_ID)" | grep -qE '^[a-z0-9][a-z0-9_-]{0,63}$$'; then \
+	    echo "error: SURVEY_ID must match ^[a-z0-9][a-z0-9_-]{0,63}\$$" >&2; \
+	    exit 1; \
+	fi
+	@tmp=$$(mktemp) && trap "rm -f $$tmp" EXIT INT TERM HUP && \
+	  printf "INSTALL quack;\nLOAD quack;\nCREATE OR REPLACE MACRO rq(sql) AS TABLE (FROM quack_query('quack:%s:%s', sql, token => '%s', disable_ssl => true));\nCREATE OR REPLACE VIEW remote_votes AS FROM rq('FROM votes');\n" \
+	    "$$RAILWAY_QUACK_HOST" "$$RAILWAY_QUACK_PORT" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
+	  if [ -n "$(SURVEY_ID)" ]; then \
+	    duckdb -init "$$tmp" -c "WITH t AS (SELECT answer, count(*) AS clicks FROM remote_votes WHERE survey_id = '$(SURVEY_ID)' GROUP BY answer) SELECT '$(SURVEY_ID)' AS survey_id, answer, clicks, bar(clicks, 0, (SELECT max(clicks) FROM t), 30) AS chart FROM t ORDER BY clicks DESC;"; \
+	  else \
+	    duckdb -init "$$tmp" -c "WITH t AS (SELECT survey_id, answer, count(*) AS clicks FROM remote_votes GROUP BY ALL), m AS (SELECT survey_id, max(clicks) AS top FROM t GROUP BY survey_id) SELECT t.survey_id, t.answer, t.clicks, bar(t.clicks, 0, m.top, 30) AS chart FROM t JOIN m USING (survey_id) ORDER BY t.survey_id DESC, t.clicks DESC;"; \
+	  fi
