@@ -39,4 +39,6 @@ WORKDIR /var/db/survey
 # Cosmetic; Railway routes via $PORT and TCP Proxy mappings, not EXPOSE.
 EXPOSE 8080 9494
 
-ENTRYPOINT ["/usr/local/bin/survey"]
+# Bind HTTP to Railway's assigned $PORT when present. Falls back to
+# SURVEY_HTTP_ADDR (or the app default) outside Railway/local.
+ENTRYPOINT ["/bin/sh", "-c", "if [ -n \"$PORT\" ]; then export SURVEY_HTTP_ADDR=\"0.0.0.0:$PORT\"; fi; exec /usr/local/bin/survey"]
