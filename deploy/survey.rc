@@ -12,13 +12,35 @@
 
 name="survey"
 rcvar="survey_enable"
-pidfile="/var/run/${name}.pid"
+# Pidfile lives under /var/run/survey/ which we chown to the survey user, so
+# daemon(8) can write it after dropping privileges via -u survey.
+pidfile_dir="/var/run/${name}"
+pidfile="${pidfile_dir}/${name}.pid"
 logfile="/var/log/survey/survey.log"
-survey_user="survey"
+# NOTE: variable intentionally named with leading underscore so rc.subr
+# doesn't auto-su to it. Setting `survey_user="survey"` would make the
+# framework run the binary via `su -m survey -c ...`, which is what we used
+# to want — but setusercontext() trips on this host, so we run as root.
+_survey_user="survey"
 survey_env_file="/usr/local/etc/survey/survey.env"
 
 command="/usr/sbin/daemon"
-command_args="-c -f -P ${pidfile} -o ${logfile} -t ${name} -u ${survey_user} /usr/local/bin/survey"
+# Runs as root. We previously tried `-u ${survey_user}` (proper drop) but it
+# tripped setusercontext() on this host with "failed to set user environment".
+# The binary only writes to /var/db/survey and /var/log/survey and binds to
+# ports >1024, so root is acceptable for a single-purpose VM. Revisit if you
+# move this to a multi-tenant box.
+command_args="-c -f -P ${pidfile} -o ${logfile} -t ${name} /usr/local/bin/survey"
+
+start_precmd="survey_prestart"
+survey_prestart()
+{
+    # /var/run can be tmpfs and not survive a reboot; recreate every start.
+    install -d -m 0755 "${pidfile_dir}"
+}
+
+# Tell rc.subr the pidfile is owned by root since the service runs as root.
+required_files="${survey_env_file}"
 
 load_rc_config $name
 : ${survey_enable:=no}

@@ -63,11 +63,37 @@ if [ "${current_ver}" = "${DUCKDB_VER}" ] \
 else
     DUCKDB_INSTALLED=0
 
-    # --- Option A: download prebuilt artifact from GitHub Releases ---
+    # --- Option A: try pkg first (cheapest if the repo has the right version) ---
+    # The 'latest' pkg branch usually has the current DuckDB; 'quarterly' lags
+    # by up to 3 months. To switch: write /usr/local/etc/pkg/repos/FreeBSD.conf
+    # pointing at .../latest (see docs/install-freebsd.md). Set SKIP_PKG=1 to
+    # bypass this option.
+    if [ -z "${SKIP_PKG:-}" ]; then
+        pkg_avail=$(pkg search -q duckdb 2>/dev/null | grep "^duckdb-${DUCKDB_VER}\(_[0-9]*\)\?\$" | head -1 || true)
+        if [ -n "${pkg_avail}" ]; then
+            echo "    pkg has ${pkg_avail}; installing via pkg"
+            pkg install -y duckdb
+            # The FreeBSD port puts headers under /usr/local/include/duckdb/;
+            # the Go binding expects them at /usr/local/include/duckdb.h.
+            [ -f "${PREFIX}/include/duckdb.h" ] || \
+                ln -sf duckdb/duckdb.h "${PREFIX}/include/duckdb.h" 2>/dev/null || true
+            [ -f "${PREFIX}/include/duckdb.hpp" ] || \
+                ln -sf duckdb/duckdb.hpp "${PREFIX}/include/duckdb.hpp" 2>/dev/null || true
+            if [ -f "${PREFIX}/lib/libduckdb.so" ] && [ -f "${PREFIX}/include/duckdb.h" ]; then
+                DUCKDB_INSTALLED=1
+            else
+                echo "    pkg install didn't produce expected files; falling through"
+            fi
+        else
+            echo "    pkg has no duckdb-${DUCKDB_VER} (quarterly branch is likely stale); trying download"
+        fi
+    fi
+
+    # --- Option B: download prebuilt artifact from GitHub Releases ---
     # Set SKIP_PREBUILT=1 to force a from-source build.
     LIBDUCKDB_REPO="${LIBDUCKDB_REPO:-sspaeti/minimial-newsletter-survey}"
     LIBDUCKDB_URL="${LIBDUCKDB_URL:-https://github.com/${LIBDUCKDB_REPO}/releases/download/freebsd-libduckdb-v${DUCKDB_VER}/freebsd-libduckdb-v${DUCKDB_VER}.tar.gz}"
-    if [ -z "${SKIP_PREBUILT:-}" ]; then
+    if [ "${DUCKDB_INSTALLED}" = "0" ] && [ -z "${SKIP_PREBUILT:-}" ]; then
         echo "    trying prebuilt: ${LIBDUCKDB_URL}"
         dl_tmp=$(mktemp -d)
         if fetch -q -o "${dl_tmp}/d.tgz" "${LIBDUCKDB_URL}" 2>/dev/null; then
@@ -127,8 +153,14 @@ else
 fi
 
 echo "==> 3/6 User & directories"
+# HOME=/var/db/survey (a real dir we own) so that daemon(8) setusercontext()
+# doesn't fail with "failed to set user environment" — happens when HOME
+# points to /nonexistent.
 if ! id survey >/dev/null 2>&1; then
-    pw useradd survey -d /nonexistent -s /usr/sbin/nologin -c "survey service"
+    pw useradd survey -d /var/db/survey -s /usr/sbin/nologin -c "survey service"
+else
+    # Heal already-existing survey user that was created with HOME=/nonexistent.
+    pw usermod survey -d /var/db/survey >/dev/null 2>&1 || true
 fi
 mkdir -p /var/db/survey /var/log/survey "${PREFIX}/etc/survey"
 chown survey:survey /var/db/survey /var/log/survey

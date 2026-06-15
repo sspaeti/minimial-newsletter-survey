@@ -51,6 +51,52 @@ Idempotently, in this order:
    `make logs`, `make status` work passwordless from the laptop. The grant
    is restricted to the specific survey-related commands those targets call.
 
+## Skip the source build: use FreeBSD's pkg
+
+DuckDB is in the FreeBSD ports tree (`databases/duckdb`). If the `pkg`
+branch you're on has the version `install-on-server.sh` is configured for
+(`DUCKDB_VER`), the script will install it via `pkg` and skip the
+download/build paths entirely.
+
+The catch: the default branch is **`quarterly`** which updates every 3
+months, so it can be a minor version behind. The **`latest`** branch
+tracks current ports.
+
+**Check your branch and what pkg has:**
+
+```sh
+grep url /etc/pkg/FreeBSD.conf      # quarterly or latest?
+pkg search -q duckdb                 # shows the version pkg would install
+```
+
+**Switch to `latest`** (one-time, idempotent override of the base config):
+
+```sh
+mkdir -p /usr/local/etc/pkg/repos
+cat > /usr/local/etc/pkg/repos/FreeBSD.conf <<'EOF'
+FreeBSD: {
+  url: "pkg+http://pkg.FreeBSD.org/${ABI}/latest",
+  mirror_type: "srv",
+  signature_type: "fingerprints",
+  fingerprints: "/usr/share/keys/pkg",
+  enabled: yes
+}
+EOF
+pkg update -f
+pkg upgrade -y                       # aligns all installed packages with `latest`
+```
+
+**Warning**: `latest` is a per-host decision. Future `pkg upgrade` will pull
+newer versions of every installed package (Caddy, Listmonk, etc.). On a
+single-purpose VM that's fine; on a host running other production services
+you may want to stay on `quarterly` and use the GHA prebuild path below.
+
+The FreeBSD port installs headers under `/usr/local/include/duckdb/`, but
+the Go binding expects `duckdb.h` directly in `/usr/local/include/`. The
+script symlinks them automatically after a `pkg install`.
+
+Set `SKIP_PKG=1` to bypass this path and force download/build.
+
 ## Skip the source build: download a prebuilt libduckdb
 
 For small/low-RAM FreeBSD hosts (mine is 512 MB), the from-source DuckDB
