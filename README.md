@@ -40,6 +40,10 @@ The server needs Go, a `libduckdb` available to the linker (or a built-in
 one via the Go bindings on Linux), an env file with a generated Quack
 token, and a service supervisor. Pick your platform:
 
+- **[Railway](docs/install-railway.md)** — Docker-based, one service,
+  persistent volume for the DuckDB file. HTTP on Railway's HTTPS edge,
+  Quack exposed via TCP Proxy so you can `ATTACH` from your laptop without
+  custom DNS up front.
 - **[Linux (EC2 / Hetzner / anywhere)](docs/install-linux.md)** — much
   shorter. `duckdb-go-bindings/v2` ships a prebuilt `libduckdb` for Linux,
   so `go build` Just Works. ~10 lines of shell + a systemd unit.

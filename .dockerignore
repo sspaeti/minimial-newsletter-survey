@@ -1,0 +1,18 @@
+# Used by deploy/railway/Dockerfile. Build context is the repo root.
+.git/
+.github/
+.claude/
+.gitignore
+build/
+docs/
+deploy/install-on-server.sh
+deploy/survey.rc
+deploy/survey.env.example
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+.DS_Store
+README.md
+CLAUDE.md
+LICENSE
+Makefile

@@ -44,8 +44,13 @@ func Open(path, quackAddr, quackToken string) (*Store, error) {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
 
+	// Quack ships via the `core` extension repo from DuckDB 1.5.3 onwards.
+	// Earlier versions (1.5.2 etc.) had it in `core_nightly` — this code requires
+	// 1.5.3+, which is what duckdb-go-bindings/v2 v0.10503.x bundles for
+	// linux/darwin/windows. The first `INSTALL` call needs outbound HTTPS to
+	// extensions.duckdb.org to fetch the .duckdb_extension file.
 	if _, err := db.Exec(`INSTALL quack`); err != nil {
-		return nil, fmt.Errorf("install quack: %w", err)
+		return nil, fmt.Errorf("install quack (need DuckDB 1.5.3+ and outbound HTTPS): %w", err)
 	}
 	if _, err := db.Exec(`LOAD quack`); err != nil {
 		return nil, fmt.Errorf("load quack: %w", err)

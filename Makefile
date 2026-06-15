@@ -9,7 +9,8 @@ DUCKDB_VER ?= 1.5.3
 # linux/windows only.
 BUILD_FLAGS := -tags=duckdb_use_lib
 
-.PHONY: test fmt vet sync build deploy logs status query token duckdb-connect push-installer install-on-server smoke help
+.PHONY: test fmt vet sync build deploy logs status query token duckdb-connect push-installer install-on-server smoke help \
+        railway-token railway-docker-build railway-docker-run railway-duckdb-connect
 
 SURVEY_HOST ?= survey.sspaeti.duckdns.org
 QUACK_HOST  ?= quack.sspaeti.duckdns.org
@@ -29,6 +30,14 @@ help:
 	@echo "                      (needs \$$SURVEY_QUACK_TOKEN env var)"
 	@echo "  smoke             - end-to-end check (DNS + TLS + /healthz + HEAD /survey)"
 	@echo "  test / fmt / vet  - local Go targets"
+	@echo ""
+	@echo "Railway targets (see docs/install-railway.md):"
+	@echo "  railway-token            - print a fresh SURVEY_QUACK_TOKEN to paste into Railway env"
+	@echo "  railway-docker-build     - docker build the Railway image locally for testing"
+	@echo "  railway-docker-run       - docker run the image with a tmp volume + generated token"
+	@echo "  railway-duckdb-connect   - duckdb attached to Railway's TCP Proxy"
+	@echo "                             (needs RAILWAY_QUACK_HOST, RAILWAY_QUACK_PORT,"
+	@echo "                              SURVEY_QUACK_TOKEN env vars)"
 	@echo ""
 	@echo "Server target (run on FreeBSD as root, after 'ssh $(HOST)' && 'su root'):"
 	@echo "  install-on-server - one-shot setup: pkg deps, DuckDB $(DUCKDB_VER) build,"
@@ -115,7 +124,7 @@ duckdb-connect:
 	    exit 1; \
 	fi
 	@tmp=$$(mktemp) && trap "rm -f $$tmp" EXIT INT TERM HUP && \
-	  printf "INSTALL quack FROM community;\nLOAD quack;\nATTACH 'quack:%s' AS s (TYPE QUACK, TOKEN '%s');\n.echo on\n.echo \"\\\\nConnected. Try:  FROM s.votes ORDER BY ts DESC LIMIT 10;\\\\n\"\n.echo off\n" "$(QUACK_HOST)" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
+	  printf "INSTALL quack;\nLOAD quack;\nATTACH 'quack:%s' AS s (TYPE QUACK, TOKEN '%s');\n.echo on\n.echo \"\\\\nConnected. Try:  FROM s.votes ORDER BY ts DESC LIMIT 10;\\\\n\"\n.echo off\n" "$(QUACK_HOST)" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
 	  duckdb -init "$$tmp"
 
 # End-to-end smoke test from the laptop. Uses HEAD on /survey/* (server returns
@@ -140,3 +149,39 @@ smoke:
 	echo ""; \
 	echo "$$pass passed, $$fail failed"; \
 	[ "$$fail" = "0" ]
+
+# --- Railway -------------------------------------------------------------
+# See docs/install-railway.md for the full one-time setup.
+
+RAILWAY_IMAGE ?= survey:railway
+
+railway-token:
+	@head -c 32 /dev/urandom | base64 | tr -d '\n'; echo
+
+railway-docker-build:
+	docker build -f deploy/railway/Dockerfile -t $(RAILWAY_IMAGE) .
+
+railway-docker-run:
+	@token=$$(head -c 32 /dev/urandom | base64 | tr -d '\n'); \
+	echo "Generated SURVEY_QUACK_TOKEN (one-shot): $$token"; \
+	docker run --rm -it \
+	    -p 8080:8080 -p 9494:9494 \
+	    -e SURVEY_HTTP_ADDR=0.0.0.0:8080 \
+	    -e SURVEY_QUACK_ADDR=0.0.0.0:9494 \
+	    -e SURVEY_QUACK_TOKEN="$$token" \
+	    -v survey-data:/var/db/survey \
+	    $(RAILWAY_IMAGE)
+
+# Same idea as duckdb-connect but for Railway's TCP Proxy (host:port instead
+# of a custom DNS name). Token goes via mktemp init file, not argv.
+railway-duckdb-connect:
+	@command -v duckdb >/dev/null || { echo "error: duckdb CLI not on PATH (install duckdb locally first)" >&2; exit 1; }
+	@if [ -z "$$SURVEY_QUACK_TOKEN" ] || [ -z "$$RAILWAY_QUACK_HOST" ] || [ -z "$$RAILWAY_QUACK_PORT" ]; then \
+	    echo "error: need SURVEY_QUACK_TOKEN, RAILWAY_QUACK_HOST, RAILWAY_QUACK_PORT" >&2; \
+	    echo "       see docs/install-railway.md" >&2; \
+	    exit 1; \
+	fi
+	@tmp=$$(mktemp) && trap "rm -f $$tmp" EXIT INT TERM HUP && \
+	  printf "INSTALL quack;\nLOAD quack;\nATTACH 'quack:%s:%s' AS s (TYPE QUACK, TOKEN '%s', DISABLE_SSL true);\n.echo on\n.echo \"\\\\nConnected. Try:  FROM s.votes ORDER BY ts DESC LIMIT 10;\\\\n\"\n.echo off\n" \
+	    "$$RAILWAY_QUACK_HOST" "$$RAILWAY_QUACK_PORT" "$$SURVEY_QUACK_TOKEN" > "$$tmp" && \
+	  duckdb -init "$$tmp"
