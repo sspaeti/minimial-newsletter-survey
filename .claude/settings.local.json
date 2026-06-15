@@ -5,7 +5,13 @@
       "Bash(go vet *)",
       "Bash(go mod *)",
       "Bash(go test *)",
-      "Bash(go build *)"
+      "Bash(go build *)",
+      "Bash(make help *)",
+      "Bash(sh -n /home/sspaeti/git/sspaeti.com/minimal-newsletter-survey/deploy/install-on-server.sh)",
+      "Bash(dig +short survey.sspaeti.duckdns.org)",
+      "Bash(dig +short quack.sspaeti.duckdns.org)",
+      "Bash(dig +short ti.sspaeti.duckdns.org)",
+      "Bash(make smoke *)"
     ]
   }
 }

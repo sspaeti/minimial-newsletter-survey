@@ -11,9 +11,9 @@ Design doc: [`docs/superpowers/specs/2026-06-04-newsletter-survey-design.md`](do
 ```markdown
 What did you think of today's newsletter?
 
-[Awesome!](https://ti.sspaeti.duckdns.org/survey/2026-06-04/awesome)
-[Pretty Good](https://ti.sspaeti.duckdns.org/survey/2026-06-04/good)
-[Could be better](https://ti.sspaeti.duckdns.org/survey/2026-06-04/better)
+[Awesome!](https://survey.sspaeti.duckdns.org/survey/2026-06-04/awesome)
+[Pretty Good](https://survey.sspaeti.duckdns.org/survey/2026-06-04/good)
+[Could be better](https://survey.sspaeti.duckdns.org/survey/2026-06-04/better)
 ```
 
 Each click records one vote and redirects to a "Thanks!" page. The next
@@ -34,44 +34,38 @@ any code or schema change.
 If the same reader clicks twice on the same newsletter (e.g. Awesome, then
 Good), the second click replaces the first — last vote wins.
 
-## One-time FreeBSD server setup
+## One-time server setup
 
-Run on `ti.sspaeti.duckdns.org` as root (or with `doas`):
+The server needs Go, a `libduckdb` available to the linker (or a built-in
+one via the Go bindings on Linux), an env file with a generated Quack
+token, and a service supervisor. Pick your platform:
 
-```sh
-# packages (duckdb is already installed; we need go, rsync, and libduckdb headers)
-pkg install -y go rsync
+- **[Linux (EC2 / Hetzner / anywhere)](docs/install-linux.md)** — much
+  shorter. `duckdb-go-bindings/v2` ships a prebuilt `libduckdb` for Linux,
+  so `go build` Just Works. ~10 lines of shell + a systemd unit.
+- **[FreeBSD](docs/install-freebsd.md)** — what I actually run on `ti`.
+  Needs a from-source DuckDB build (~20 min) because upstream ships no
+  FreeBSD binaries. Automated via `make push-installer` → `make install-on-server`.
 
-# Verify libduckdb is present (the build tag duckdb_use_lib will link against it).
-# The duckdb FreeBSD port installs the shared library and headers under /usr/local.
-ls /usr/local/lib/libduckdb.so /usr/local/include/duckdb.h
+> [!NOTE]
+> FreeBSD because I already have one running on my self-hosted server, so it
+> costs me nothing extra. If I were starting fresh, EC2 with the Linux guide
+> would be ~$3-7/mo and would skip the source build entirely.
 
-# service user (no login, no home)
-pw useradd survey -d /nonexistent -s /usr/sbin/nologin
+## Reverse proxy + TLS (external)
 
-# directories
-mkdir -p /var/db/survey /var/log/survey /usr/local/etc/survey \
-         /home/sspaeti/survey-src
-chown survey:survey /var/db/survey /var/log/survey
-chown sspaeti:sspaeti /home/sspaeti/survey-src
+TLS termination happens on whatever reverse proxy is in front of `ti`
+(e.g. Nginx Proxy Manager on Unraid). Add two proxy hosts with Let's Encrypt:
 
-# env file
-cp deploy/survey.env.example /usr/local/etc/survey/survey.env
-TOKEN=$(head -c 32 /dev/urandom | base64)
-sed -i '' "s|CHANGE_ME_TO_BASE64_TOKEN|${TOKEN}|" /usr/local/etc/survey/survey.env
-chmod 600 /usr/local/etc/survey/survey.env
-chown survey:survey /usr/local/etc/survey/survey.env
-echo "Quack token: ${TOKEN}"   # save this; you'll need it on your laptop
+| Hostname                       | Backend                         |
+|--------------------------------|---------------------------------|
+| `survey.sspaeti.duckdns.org`   | `http://<ti-LAN-ip>:8080`       |
+| `quack.sspaeti.duckdns.org`    | `http://<ti-LAN-ip>:9494`       |
 
-# rc.d service
-cp deploy/survey.rc /usr/local/etc/rc.d/survey
-chmod +x /usr/local/etc/rc.d/survey
-sysrc survey_enable=YES
-
-# Caddy
-cat deploy/Caddyfile.snippet >> /usr/local/etc/caddy/Caddyfile
-service caddy reload
-```
+The `survey.*` host carries the click traffic; the `quack.*` host carries
+the DuckDB Quack remote-protocol traffic for ad-hoc queries from your laptop.
+Restrict the two ports to LAN-only on `ti`'s firewall — they shouldn't be
+reachable from the public internet directly.
 
 ## Deploy
 
@@ -81,23 +75,28 @@ From your laptop, in this directory:
 make deploy
 ```
 
-This rsyncs the source to the FreeBSD host, builds there with
-`-tags=duckdb_use_lib` (dynamically linked against your system libduckdb 1.5.3
-since duckdb-go-bindings ships no pre-built FreeBSD library), atomically swaps
-the binary, and restarts the service.
+This rsyncs the source to the host, builds the Go binary there, atomically
+swaps `/usr/local/bin/survey`, and restarts the service. On FreeBSD the build
+links dynamically against the system `libduckdb.so` via `-tags=duckdb_use_lib`;
+on Linux the prebuilt library inside `duckdb-go-bindings/v2` is used and no
+extra tag is needed.
 
-Other targets: `make test`, `make logs`, `make status`, `make query`.
+Run `make help` for the full target list. Common ones:
+`make smoke` (DNS + TLS + healthz), `make logs`, `make status`,
+`make token`, `make duckdb-connect`.
 
 ## Query from your laptop
 
+Fastest path:
+
 ```sh
-duckdb
+export SURVEY_QUACK_TOKEN=$(make -s token)    # one-time, fetches over SSH
+make duckdb-connect                            # opens duckdb with `s` attached
 ```
 
-```sql
-CREATE SECRET (TYPE quack, TOKEN '<paste your token>');
-ATTACH 'quack:quack.sspaeti.duckdns.org' AS s;
+Then:
 
+```sql
 -- One newsletter's results
 FROM s.votes
 WHERE survey_id = '2026-06-04'
@@ -111,7 +110,15 @@ GROUP BY ALL
 ORDER BY survey_id DESC, votes DESC;
 ```
 
-You can also fall back to `ssh ti.sspaeti.duckdns.org "duckdb /var/db/survey/votes.duckdb -c 'FROM votes'"` if Quack is ever misbehaving.
+Or paste manually:
+
+```sql
+CREATE SECRET (TYPE quack, TOKEN '<paste your token>');
+ATTACH 'quack:quack.sspaeti.duckdns.org' AS s;
+FROM s.votes ORDER BY ts DESC LIMIT 20;
+```
+
+Fallback if Quack misbehaves: `ssh ti "duckdb /var/db/survey/votes.duckdb -c 'FROM votes'"`.
 
 ## Privacy
 
@@ -133,9 +140,12 @@ You can also fall back to `ssh ti.sspaeti.duckdns.org "duckdb /var/db/survey/vot
 │   ├── store/store.go             # DuckDB open, schema, quack_serve, upsert
 │   └── voter/hash.go              # daily salt + voter hash
 ├── deploy/
+│   ├── install-on-server.sh       # idempotent FreeBSD installer (runs as root on ti)
 │   ├── survey.rc                  # FreeBSD rc.d service script
-│   ├── survey.env.example         # env-var template
-│   └── Caddyfile.snippet          # reverse proxy + TLS
+│   └── survey.env.example         # env-var template
+├── docs/
+│   ├── install-linux.md           # minimal Linux/EC2 guide (the easy path)
+│   └── install-freebsd.md         # full FreeBSD guide (what this repo's installer automates)
 ├── Makefile
 └── go.mod
 ```

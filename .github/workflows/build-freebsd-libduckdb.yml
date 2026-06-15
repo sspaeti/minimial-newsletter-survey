@@ -1,0 +1,91 @@
+name: build-freebsd-libduckdb
+
+# Builds DuckDB from source inside a FreeBSD VM on a GitHub-hosted runner,
+# then publishes libduckdb.so + headers + the duckdb CLI as a release asset.
+# Use this when your real FreeBSD host (e.g. a 512 MB VPS) is too small to
+# compile DuckDB itself. install-on-server.sh will try to download the
+# release asset before falling back to a local source build.
+#
+# Manual trigger only — go to Actions → "build-freebsd-libduckdb" → Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duckdb_version:
+        description: 'DuckDB version (e.g. 1.5.3)'
+        default: '1.5.3'
+        required: true
+
+permissions:
+  contents: write   # needed to create the release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build DuckDB inside FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        env:
+          DUCKDB_VER: ${{ github.event.inputs.duckdb_version }}
+        with:
+          release: "14.0"
+          mem: 4096
+          cpu: 2
+          usesh: true
+          envs: 'DUCKDB_VER'
+          prepare: |
+            pkg install -y git cmake ninja gmake python3
+          run: |
+            set -eu
+            SRC="/usr/local/src/duckdb-${DUCKDB_VER}"
+            git clone --branch "v${DUCKDB_VER}" --depth 1 \
+                https://github.com/duckdb/duckdb.git "${SRC}"
+
+            # Same FreeBSD patch install-on-server.sh applies: explicit_bzero
+            # is declared in <strings.h> on FreeBSD, but DuckDB's vendored
+            # mbedtls doesn't include it.
+            PU="${SRC}/third_party/mbedtls/library/platform_util.cpp"
+            if ! grep -q '<strings.h>' "${PU}"; then
+                tmp=$(mktemp)
+                printf '#include <strings.h>\n' > "${tmp}"
+                cat "${PU}" >> "${tmp}"
+                mv "${tmp}" "${PU}"
+            fi
+
+            cd "${SRC}"
+            GEN=ninja gmake
+
+            # Collect the artifacts we actually need into a release tarball.
+            OUT_DIR="freebsd-libduckdb-v${DUCKDB_VER}"
+            OUT="${GITHUB_WORKSPACE}/${OUT_DIR}"
+            mkdir -p "${OUT}/lib" "${OUT}/include" "${OUT}/bin"
+            find build/release -name 'libduckdb.so*' \
+                -exec install -m 0644 {} "${OUT}/lib/" \;
+            find src/include -maxdepth 2 -name 'duckdb.h' \
+                -exec install -m 0644 {} "${OUT}/include/" \;
+            find src/include -maxdepth 2 -name 'duckdb.hpp' \
+                -exec install -m 0644 {} "${OUT}/include/" \; 2>/dev/null || true
+            find build/release -name 'duckdb' -type f \
+                -exec install -m 0755 {} "${OUT}/bin/" \;
+
+            cd "${GITHUB_WORKSPACE}"
+            tar czf "${OUT_DIR}.tar.gz" "${OUT_DIR}"
+            ls -la "${OUT_DIR}.tar.gz"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: freebsd-libduckdb-v${{ github.event.inputs.duckdb_version }}
+          name: FreeBSD libduckdb v${{ github.event.inputs.duckdb_version }}
+          body: |
+            Prebuilt FreeBSD x86_64 `libduckdb.so` + headers + `duckdb` CLI for
+            DuckDB v${{ github.event.inputs.duckdb_version }}.
+
+            Built inside vmactions/freebsd-vm on a GitHub Ubuntu runner with
+            the same FreeBSD-specific patches `install-on-server.sh` applies.
+
+            Installer auto-downloads this asset for the matching version.
+          files: freebsd-libduckdb-v${{ github.event.inputs.duckdb_version }}.tar.gz
+          fail_on_unmatched_files: true
