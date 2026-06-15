@@ -41,4 +41,4 @@ EXPOSE 8080 9494
 
 # Bind HTTP to Railway's assigned $PORT when present. Falls back to
 # SURVEY_HTTP_ADDR (or the app default) outside Railway/local.
-ENTRYPOINT ["/bin/sh", "-c", "if [ -n \"$PORT\" ]; then export SURVEY_HTTP_ADDR=\"0.0.0.0:$PORT\"; fi; exec /usr/local/bin/survey"]
+ENTRYPOINT ["/bin/sh", "-c", "if [ -n \"$PORT\" ]; then export SURVEY_HTTP_ADDR=\"0.0.0.0:$PORT\"; export SURVEY_QUACK_ADDR=\"0.0.0.0:${SURVEY_QUACK_PORT:-9495}\"; fi; exec /usr/local/bin/survey"]
