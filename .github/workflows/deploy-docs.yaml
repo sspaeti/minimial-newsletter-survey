@@ -59,9 +59,13 @@ jobs:
           HUGO_ENV: production
         run: |
           cd docs
-          hugo \
-            --gc --minify \
-            --baseURL "${{ steps.pages.outputs.base_url }}/"
+          hugo --gc --minify
+          # Note: we intentionally do NOT pass --baseURL. The hugo.yaml
+          # baseURL is https://pollmd.ssp.sh/. Overriding with
+          # ${{ steps.pages.outputs.base_url }} returns the github.io
+          # project-subpath URL until the custom domain is verified in the
+          # repo's Pages settings, which then bakes /pollmd/ into every
+          # asset URL and 404s on the live pollmd.ssp.sh host.
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
