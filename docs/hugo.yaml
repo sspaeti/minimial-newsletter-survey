@@ -51,7 +51,7 @@ menu:
         icon: github
 
 params:
-  description: Minimal newsletter polls in Markdown. A ~200-line Go service that records anonymous reader ratings into a single DuckDB file.
+  description: Minimal (newsletter) polls in Markdown. A ~200-line Go service that records anonymous reader ratings into a single DuckDB file.
   images:
     - /images/pollmd-hero.png
 
