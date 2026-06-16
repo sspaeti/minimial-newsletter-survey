@@ -279,17 +279,31 @@ FROM rq('SELECT survey_id, answer, count(*) AS n
 .
 ├── cmd/survey/main.go             # entrypoint, env wiring
 ├── internal/
-│   ├── server/server.go           # routes, click handler, X-Forwarded-For
-│   ├── server/thanks.html         # embedded thanks page
-│   ├── store/store.go             # DuckDB open, schema, quack_serve, upsert
+│   ├── server/server.go           # routes, vote + result + thanks handlers, bot UA filter
+│   ├── server/thanks.html         # embedded thanks page (uses /style.css)
+│   ├── server/result.html         # embedded result page (uses /style.css)
+│   ├── server/style.css           # shared stylesheet, served at /style.css
+│   ├── store/store.go             # DuckDB open, schemas, quack_serve, tallies, allowlist
 │   └── voter/hash.go              # daily salt + voter hash
 ├── deploy/
+│   ├── railway/Dockerfile         # Railway image (multi-stage Go build → debian-slim)
 │   ├── install-on-server.sh       # idempotent FreeBSD installer (runs as root on ti)
 │   ├── survey.rc                  # FreeBSD rc.d service script
 │   └── survey.env.example         # env-var template
 ├── docs/
+│   ├── install-railway.md         # Railway one-time setup
 │   ├── install-linux.md           # minimal Linux/EC2 guide (the easy path)
 │   └── install-freebsd.md         # full FreeBSD guide (what this repo's installer automates)
+├── railway.json                   # Railway config-as-code (auto-detected at repo root)
+├── .dockerignore                  # trims the Railway build context
 ├── Makefile
+├── CHANGELOG.md
 └── go.mod
 ```
+
+## Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the running history of features
+and behaviour changes — Railway path, the short `/<id>/<answer>` URL
+shape, the `/result/{id}` page, the bot User-Agent filter, the
+per-survey answer-locking via `make survey-create`, and so on.
