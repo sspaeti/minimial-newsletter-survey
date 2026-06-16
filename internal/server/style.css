@@ -244,6 +244,20 @@ h1 {
   line-height: 1.6;
 }
 
+/* Inline links inside the card's body paragraphs (home.html explainer).
+ * Browser default is dark blue; match the page accent palette instead. */
+.card p a {
+  color: var(--secondary);
+  text-decoration: none;
+  border-bottom: 1px solid var(--outlinegray);
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.card p a:hover {
+  color: var(--tertiary);
+  border-bottom-color: var(--secondary);
+}
+
 .footer-credit {
   margin: 1.25rem 0 0;
   font-size: 0.75rem;

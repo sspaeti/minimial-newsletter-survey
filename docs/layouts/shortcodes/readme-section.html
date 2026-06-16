@@ -12,6 +12,14 @@
   as substrings of full lines. The start line is included; the end line is
   not, so consecutive sections can chain cleanly (each one's end is the next
   one's start).
+
+  Transformations applied to pulled content:
+    - `static/images/` → `/images/` so README's GitHub-relative image paths
+      resolve against Hugo's static/ tree.
+    - If a ```mermaid fence is present, sets Page.Store "hasMermaid" true so
+      Hextra's mermaid.js loader fires for this page. Through `markdownify`
+      the render hook still converts the fence to <pre class="mermaid">, but
+      the JS loader's detection misses shortcode-driven pages without this.
 */ -}}
 {{- $file := .Get "file" | default "README-link.md" -}}
 {{- $start := .Get "start" -}}
@@ -35,7 +43,16 @@
     {{- end -}}
   {{- end -}}
 
-  {{- delimit $output "\n" | markdownify -}}
+  {{- $rendered := delimit $output "\n" -}}
+  {{- $rendered = replace $rendered "static/images/" "/images/" -}}
+  {{- if strings.Contains $rendered "```mermaid" -}}
+    {{- .Page.Store.Set "hasMermaid" true -}}
+  {{- end -}}
+  {{- $rendered | markdownify -}}
 {{- else -}}
-  {{- $content | markdownify -}}
+  {{- $rendered := replace $content "static/images/" "/images/" -}}
+  {{- if strings.Contains $rendered "```mermaid" -}}
+    {{- .Page.Store.Set "hasMermaid" true -}}
+  {{- end -}}
+  {{- $rendered | markdownify -}}
 {{- end -}}

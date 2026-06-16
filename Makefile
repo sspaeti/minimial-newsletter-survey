@@ -10,7 +10,8 @@ DUCKDB_VER ?= 1.5.3
 BUILD_FLAGS := -tags=duckdb_use_lib
 
 .PHONY: test fmt vet sync build deploy logs status query token duckdb-connect push-installer install-on-server smoke help \
-        railway-token railway-docker-build railway-docker-run railway-duckdb-connect survey-result survey-reset survey-create survey-delete
+        railway-token railway-docker-build railway-docker-run railway-duckdb-connect survey-result survey-reset survey-create survey-delete \
+        docs docs-serve docs-clean
 
 # Public HTTPS host for the Railway deploy (newsletter readers click here).
 # Railway terminates TLS on 443 and proxies to the container's port 8080
@@ -51,7 +52,12 @@ help:
 	@echo "  smoke             - end-to-end check (DNS + TLS + /healthz + HEAD /survey)"
 	@echo "  test / fmt / vet  - local Go targets"
 	@echo ""
-	@echo "Railway targets (see docs/install-railway.md):"
+	@echo "Docs site targets (pollmd.ssp.sh, Hugo + Hextra in docs/):"
+	@echo "  docs              - one-shot Hugo build into docs/public/"
+	@echo "  docs-serve        - run the Hugo dev server (localhost:1310)"
+	@echo "  docs-clean        - delete docs/public, docs/resources, .hugo_build.lock"
+	@echo ""
+	@echo "Railway targets (see docs/content/docs/install/railway.md):"
 	@echo "  railway-token            - print a fresh SURVEY_QUACK_TOKEN to paste into Railway env"
 	@echo "  railway-docker-build     - docker build the Railway image locally for testing"
 	@echo "  railway-docker-run       - docker run the image with a tmp volume + generated token"
@@ -207,6 +213,20 @@ smoke:
 	echo ""; \
 	echo "$$pass passed, $$fail failed"; \
 	[ "$$fail" = "0" ]
+
+# --- Docs site -----------------------------------------------------------
+# Wrappers so you can run `make docs` from the project root rather than
+# `cd docs && make build` every time. The real targets live in docs/Makefile;
+# these just delegate.
+
+docs:
+	@$(MAKE) -C docs build
+
+docs-serve:
+	@$(MAKE) -C docs serve
+
+docs-clean:
+	@$(MAKE) -C docs clean
 
 # --- Railway -------------------------------------------------------------
 # See docs/install-railway.md for the full one-time setup.
