@@ -81,3 +81,37 @@ func (s *Store) RecordVote(surveyID, answer, voter string) error {
 	_, err := s.db.Exec(q, surveyID, answer, voter)
 	return err
 }
+
+// Tally is one (answer, count) pair for a survey. Ordered most-popular-first.
+type Tally struct {
+	Answer string
+	Clicks int
+}
+
+// TallyBySurvey returns the per-answer click count for a survey, most popular
+// first. An unknown survey_id returns an empty slice (not an error) — the
+// result page renders an "empty" state.
+func (s *Store) TallyBySurvey(surveyID string) ([]Tally, error) {
+	const q = `
+		SELECT answer, count(*) AS clicks
+		FROM votes
+		WHERE survey_id = ?
+		GROUP BY answer
+		ORDER BY clicks DESC, answer
+	`
+	rows, err := s.db.Query(q, surveyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Tally
+	for rows.Next() {
+		var t Tally
+		if err := rows.Scan(&t.Answer, &t.Clicks); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

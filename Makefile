@@ -153,9 +153,12 @@ smoke:
 	check "$(QUACK_HOST) TLS OK"    sh -c 'curl -s  --max-time 8 -o /dev/null -w "%{http_code}" https://$(QUACK_HOST)/        | grep -E "^[2-5][0-9][0-9]$$"'; \
 	echo "Survey service"; \
 	check "/healthz returns 200"    sh -c '[ "$$(curl -s --max-time 8 -o /dev/null -w "%{http_code}" https://$(SURVEY_HOST)/healthz)" = "200" ]'; \
-	check "HEAD /survey returns 200 (no vote recorded)" \
+	check "HEAD /<id>/<answer> returns 200 (no vote recorded)" \
+	                                sh -c '[ "$$(curl -sI --max-time 8 -o /dev/null -w "%{http_code}" https://$(SURVEY_HOST)/_smoke/test)" = "200" ]'; \
+	check "HEAD /survey/<id>/<answer> still 200 (legacy back-compat)" \
 	                                sh -c '[ "$$(curl -sI --max-time 8 -o /dev/null -w "%{http_code}" https://$(SURVEY_HOST)/survey/_smoke/test)" = "200" ]'; \
 	check "/thanks returns 200"     sh -c '[ "$$(curl -s --max-time 8 -o /dev/null -w "%{http_code}" https://$(SURVEY_HOST)/thanks)" = "200" ]'; \
+	check "/result/<id> returns 200" sh -c '[ "$$(curl -s --max-time 8 -o /dev/null -w "%{http_code}" https://$(SURVEY_HOST)/result/_smoke)" = "200" ]'; \
 	echo ""; \
 	echo "$$pass passed, $$fail failed"; \
 	[ "$$fail" = "0" ]

@@ -22,8 +22,20 @@ type Config struct {
 	BlogURL    string
 }
 
-//go:embed thanks.html
+//go:embed thanks.html result.html
 var staticFS embed.FS
+
+// Route patterns. Edit here if the URL shape ever changes — the rest of the
+// file uses these constants so any path change is a single edit. The vote
+// patterns use Go 1.22 ServeMux wildcards; r.PathValue("id") and
+// r.PathValue("answer") pull the segments inside the handler.
+const (
+	routeVote       = "/{id}/{answer}"        // primary, short form (e.g. q.ssp.sh/init/awesome)
+	routeVoteLegacy = "/survey/{id}/{answer}" // kept so old newsletter links keep working
+	routeResult     = "/result/{id}"          // server-rendered tally page
+	routeThanks     = "/thanks"
+	routeHealth     = "/healthz"
+)
 
 // slugRe gates both survey_id and answer. Lowercase alnum, dash, underscore,
 // must start with alnum, max 64 chars. Keeps the URL space clean and the
@@ -83,23 +95,28 @@ type Server struct {
 	store  *store.Store
 	salt   *voter.Salt
 	thanks *template.Template
+	result *template.Template
 }
 
 func New(cfg Config, st *store.Store) *Server {
-	tmpl := template.Must(template.ParseFS(staticFS, "thanks.html"))
 	return &Server{
 		cfg:    cfg,
 		store:  st,
 		salt:   voter.NewSalt(),
-		thanks: tmpl,
+		thanks: template.Must(template.ParseFS(staticFS, "thanks.html")),
+		result: template.Must(template.ParseFS(staticFS, "result.html")),
 	}
 }
 
 func (s *Server) ListenAndServe() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/survey/", s.handleSurvey)
-	mux.HandleFunc("/thanks", s.handleThanks)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	// Order doesn't matter for Go 1.22 ServeMux — more specific patterns
+	// always win. /result/{id} beats /{id}/{answer} for paths under /result/.
+	mux.HandleFunc(routeResult, s.handleResult)
+	mux.HandleFunc(routeVote, s.handleSurvey)
+	mux.HandleFunc(routeVoteLegacy, s.handleSurvey)
+	mux.HandleFunc(routeThanks, s.handleThanks)
+	mux.HandleFunc(routeHealth, func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
 	})
 
@@ -126,13 +143,8 @@ func (s *Server) handleSurvey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rest := strings.TrimPrefix(r.URL.Path, "/survey/")
-	parts := strings.SplitN(rest, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	surveyID, answer := parts[0], parts[1]
+	surveyID := r.PathValue("id")
+	answer := r.PathValue("answer")
 	if !slugRe.MatchString(surveyID) || !slugRe.MatchString(answer) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -173,6 +185,73 @@ func (s *Server) handleThanks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if err := s.thanks.Execute(w, data); err != nil {
 		log.Printf("thanks template: %v", err)
+	}
+}
+
+// tallyRow is the view-model passed to result.html — Tally as it comes out
+// of the store, plus a PercentOfMax we computed for the CSS bar width.
+type tallyRow struct {
+	Answer       string
+	Clicks       int
+	PercentOfMax int
+}
+
+type resultPageData struct {
+	SurveyID   string
+	Tallies    []tallyRow
+	TotalVotes int
+	BlogURL    string
+}
+
+func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	surveyID := r.PathValue("id")
+	if !slugRe.MatchString(surveyID) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := s.store.TallyBySurvey(surveyID)
+	if err != nil {
+		log.Printf("tally survey_id=%s err=%v", surveyID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	total, top := 0, 0
+	for _, t := range rows {
+		total += t.Clicks
+		if t.Clicks > top {
+			top = t.Clicks
+		}
+	}
+	view := make([]tallyRow, len(rows))
+	for i, t := range rows {
+		pct := 0
+		if top > 0 {
+			pct = (t.Clicks * 100) / top
+		}
+		view[i] = tallyRow{Answer: t.Answer, Clicks: t.Clicks, PercentOfMax: pct}
+	}
+
+	data := resultPageData{
+		SurveyID:   surveyID,
+		Tallies:    view,
+		TotalVotes: total,
+		BlogURL:    s.cfg.BlogURL,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := s.result.Execute(w, data); err != nil {
+		log.Printf("result template: %v", err)
 	}
 }
 

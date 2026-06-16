@@ -11,13 +11,15 @@ Design doc: [`docs/superpowers/specs/2026-06-04-newsletter-survey-design.md`](do
 ```markdown
 What did you think of today's newsletter?
 
-[Awesome!](https://survey.ssp.sh/survey/2026-06-04/awesome)
-[Pretty Good](https://survey.ssp.sh/survey/2026-06-04/good)
-[Could be better](https://survey.ssp.sh/survey/2026-06-04/better)
-[Worse](https://survey.ssp.sh/survey/2026-06-04/worse)
+[Awesome!](https://q.ssp.sh/2026-06-04/awesome)
+[Pretty Good](https://q.ssp.sh/2026-06-04/good)
+[Could be better](https://q.ssp.sh/2026-06-04/better)
+[Worse](https://q.ssp.sh/2026-06-04/worse)
+
+See the live tally → https://q.ssp.sh/result/2026-06-04
 ```
 
-The path shape is `https://<host>/survey/<survey_id>/<answer>`:
+The path shape is `https://<host>/<survey_id>/<answer>`:
 
 - `<survey_id>` identifies the newsletter issue (e.g. an ISO date like
   `2026-06-04`, or a slug like `weekly-42`).
@@ -28,6 +30,23 @@ Both slugs are free-form, validated against `^[a-z0-9][a-z0-9_-]{0,63}$`,
 so the next newsletter can use entirely different `survey_id` and `answer`
 slugs without any code or schema change. Each click records one vote and
 redirects to a "Thanks!" page.
+
+The legacy URL shape `https://<host>/survey/<survey_id>/<answer>` is kept
+working so links shipped in past newsletters don't 404 — new newsletters
+should use the shorter `/<survey_id>/<answer>` form.
+
+### Per-survey results page
+
+`https://<host>/result/<survey_id>` renders a small HTML page with a CSS
+bar chart of the tally — same design as the `/thanks` page. The Go
+handler reads from DuckDB and renders the bars server-side, so there's no
+DuckDB-WASM and no query interface exposed to the browser. Whoever knows
+the `survey_id` slug can view its results; nobody else can poke at the
+DB. Marked `noindex` so it doesn't end up in search engines.
+
+
+See [q.ssp.sh/result/init/](https://q.ssp.sh/result/init/) as an example:
+
 
 ## How votes are deduplicated
 
