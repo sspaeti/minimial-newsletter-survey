@@ -99,16 +99,14 @@ func Open(path, quackAddr, quackToken string) (_ *Store, err error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) RecordVote(surveyID, answer, voter string) error {
-	// On conflict, use CURRENT_TIMESTAMP explicitly rather than excluded.ts.
-	// excluded.ts relies on the DEFAULT CURRENT_TIMESTAMP being resolved into
-	// the EXCLUDED pseudo-row before the conflict check, which happens to work
-	// in DuckDB today but is fragile across driver/extension upgrades. Being
-	// explicit is the same behaviour and survives those changes.
+	// On conflict, set the timestamp with now() rather than relying on
+	// excluded.ts. Using CURRENT_TIMESTAMP here trips DuckDB's binder
+	// (it treats it as a column name in SET lists); now() works reliably.
 	const q = `
-		INSERT INTO votes (survey_id, answer, voter) VALUES (?, ?, ?)
-		ON CONFLICT (survey_id, voter) DO UPDATE
-		SET answer = excluded.answer, ts = CURRENT_TIMESTAMP
-	`
+        INSERT INTO votes (survey_id, answer, voter) VALUES (?, ?, ?)
+        ON CONFLICT (survey_id, voter) DO UPDATE
+        SET answer = excluded.answer, ts = now()
+    `
 	_, err := s.db.Exec(q, surveyID, answer, voter)
 	return err
 }
