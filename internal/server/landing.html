@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Vote: {{.SurveyID}}</title>
+<meta name="description" content="{{.OGDescription}}">
+
+<meta property="og:title" content="{{.OGTitle}}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{.PageURL}}">
+<meta property="og:image" content="{{.OGImageURL}}">
+<meta property="og:description" content="{{.OGDescription}}">
+<meta property="og:site_name" content="sspaeti.com newsletter survey">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@sspaeti">
+<meta name="twitter:title" content="{{.OGTitle}}">
+<meta name="twitter:description" content="{{.OGDescription}}">
+<meta name="twitter:image" content="{{.OGImageURL}}">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="card">
+    <div class="hero">
+      <img class="logo" src="https://www.ssp.sh/brain/logo_ssp_main.png" alt="sspaeti.com logo">
+      <h1>What did you think?</h1>
+      <p class="subtitle">
+        Vote on <code>{{.SurveyID}}</code>
+      </p>
+    </div>
+
+    <div class="answers">
+      {{range .Answers}}
+      <a class="answer-link" href="/{{$.SurveyID}}/{{.Slug}}">{{.Label}}</a>
+      {{end}}
+    </div>
+
+    <p class="links">
+      <a class="secondary-link" href="/result/{{.SurveyID}}">See live tally &rarr;</a>
+    </p>
+    <p class="muted">
+      One click records one vote. No cookies, no tracking.
+      Your request is hashed with a salt that rotates every midnight UTC.
+    </p>
+    <p class="footer-credit">
+      Created with <a href="https://github.com/sspaeti/pollmd" rel="noopener">pollmd</a>
+    </p>
+  </main>
+</body>
+</html>

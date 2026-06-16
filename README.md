@@ -91,6 +91,38 @@ make survey-create SURVEY_ID=quarterly-review ANSWERS=keep,change,unsubscribe
 Re-running `survey-create` upserts the row, so editing the allowed set is
 just a re-run with new `ANSWERS=…`.
 
+`make survey-create` prints a ready-to-paste block:
+
+```
+Landing page (share this URL):
+  https://q.ssp.sh/2026-06-15
+
+Markdown links to paste into your newsletter:
+
+  [Awesome](https://q.ssp.sh/2026-06-15/awesome)
+  [Good](https://q.ssp.sh/2026-06-15/good)
+  [Better](https://q.ssp.sh/2026-06-15/better)
+  [Not Sure](https://q.ssp.sh/2026-06-15/not-sure)
+  [Worse](https://q.ssp.sh/2026-06-15/worse)
+
+Live tally page:
+  https://q.ssp.sh/result/2026-06-15
+```
+
+Override the host with `make survey-create … PUBLIC_URL=https://your.host`
+(default is `https://q.ssp.sh`).
+
+### Landing page (registered surveys only)
+
+`https://<host>/<survey_id>` — and the alias `/survey/<survey_id>` —
+renders a small page with a vote button per allowed answer. Useful for
+sharing one URL in a tweet/post instead of all four. Slug → label
+conversion: `not-sure` → `Not Sure`.
+
+Only works for surveys registered via `make survey-create`. Unregistered
+(open-mode) surveys 404, so there's no wildcard landing page for "guess
+any slug".
+
 ### Per-survey results page
 
 `https://<host>/result/<survey_id>` renders a small HTML page with a CSS

@@ -15,6 +15,11 @@ BUILD_FLAGS := -tags=duckdb_use_lib
 SURVEY_HOST ?= survey.sspaeti.duckdns.org
 QUACK_HOST  ?= quack.sspaeti.duckdns.org
 
+# Public base URL printed by survey-create — the landing page URL plus
+# the markdown answer links are formatted using this. Override on the
+# CLI if you serve under a different host.
+PUBLIC_URL  ?= https://q.ssp.sh
+
 help:
 	@echo "Laptop targets (run on Arch):"
 	@echo "  push-installer    - rsync source + installer to $(HOST):$(SRC_DIR)/,"
@@ -46,6 +51,9 @@ help:
 	@echo "                             usage: make survey-reset SURVEY_ID=<id>"
 	@echo "  survey-create            - Lock a SURVEY_ID to a fixed set of answer slugs."
 	@echo "                             Unregistered surveys stay open (any slug counts)."
+	@echo "                             Prints the landing-page URL ($(PUBLIC_URL)/<id>)"
+	@echo "                             and a ready-to-paste markdown block of vote links."
+	@echo "                             Override host with PUBLIC_URL=https://your.host"
 	@echo "                             usage: make survey-create SURVEY_ID=<id> ANSWERS=a,b,c"
 	@echo ""
 	@echo "Server target (run on FreeBSD as root, after 'ssh $(HOST)' && 'su root'):"
@@ -332,4 +340,18 @@ survey-create:
 	  echo "" && \
 	  echo "Registering survey_id='$(SURVEY_ID)' with allowed answers: $(ANSWERS)" && \
 	  duckdb -init "$$tmp" -c "FROM rq('INSERT INTO surveys (survey_id, allowed_answers) VALUES (''$(SURVEY_ID)'', ''$(ANSWERS)'') ON CONFLICT (survey_id) DO UPDATE SET allowed_answers = excluded.allowed_answers RETURNING *');" && \
+	  echo "" && \
+	  echo "Landing page (share this URL):" && \
+	  echo "  $(PUBLIC_URL)/$(SURVEY_ID)" && \
+	  echo "" && \
+	  echo "Markdown links to paste into your newsletter:" && \
+	  echo "" && \
+	  for a in $$(echo "$(ANSWERS)" | tr ',' ' '); do \
+	      label=$$(echo "$$a" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $$i = toupper(substr($$i,1,1)) substr($$i,2); print}'); \
+	      echo "  [$$label]($(PUBLIC_URL)/$(SURVEY_ID)/$$a)"; \
+	  done && \
+	  echo "" && \
+	  echo "Live tally page:" && \
+	  echo "  $(PUBLIC_URL)/result/$(SURVEY_ID)" && \
+	  echo "" && \
 	  echo "done."

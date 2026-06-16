@@ -67,6 +67,19 @@ allowlist. The repo was also renamed to **pollmd** during this work.
   popular first.
 - **pollmd footer** on `/thanks` and `/result/{id}` — small grey
   "Created with pollmd" link to https://github.com/sspaeti/pollmd.
+- **Landing page** at `/{id}` (and the `/survey/{id}` alias) — vote buttons
+  for each allowed answer, with title-cased labels (`not-sure` → `Not Sure`).
+  Only renders for surveys registered via `make survey-create`; unregistered
+  surveys 404 so we don't expose a wildcard "guess any slug" page. Backed by
+  `internal/server/landing.html`, `store.GetSurveyAnswers` (slice in
+  declaration order), and a `landing` template field on `Server`.
+- **`make survey-create` now prints** the landing-page URL, a ready-to-paste
+  markdown block of vote links (with title-cased labels), and the live tally
+  URL. Uses the `PUBLIC_URL` make-var (default `https://q.ssp.sh`,
+  override on the CLI).
+- **`store.GetSurveyAnswers(surveyID)`** — returns the allowed answers as
+  an ordered slice. The existing `store.GetAllowedAnswers` (map form, used
+  by the vote hot-path) now delegates to it so parsing happens once.
 
 ### Changed
 

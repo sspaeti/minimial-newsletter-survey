@@ -106,12 +106,11 @@ type Tally struct {
 	Clicks int
 }
 
-// GetAllowedAnswers returns the per-survey answer allowlist as a set. A nil
-// map means "the survey is not registered" — the vote handler treats that as
-// open mode (any slug-valid answer counts). An empty (non-nil) map would
-// mean "registered but allows nothing" — we don't expose that state, since
-// the Makefile target rejects empty answer lists up-front.
-func (s *Store) GetAllowedAnswers(surveyID string) (map[string]bool, error) {
+// GetSurveyAnswers returns the allowed answer slugs for a survey, in the
+// order they were registered. nil means the survey is unregistered (open
+// mode — any slug-valid answer counts). The landing page handler uses
+// this slice form so it can render the buttons in a stable order.
+func (s *Store) GetSurveyAnswers(surveyID string) ([]string, error) {
 	var raw string
 	err := s.db.QueryRow(
 		`SELECT allowed_answers FROM surveys WHERE survey_id = ?`,
@@ -123,11 +122,26 @@ func (s *Store) GetAllowedAnswers(surveyID string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]bool)
+	var out []string
 	for _, a := range strings.Split(raw, ",") {
 		if a = strings.TrimSpace(a); a != "" {
-			out[a] = true
+			out = append(out, a)
 		}
+	}
+	return out, nil
+}
+
+// GetAllowedAnswers returns the per-survey answer allowlist as a set for
+// O(1) lookup from the vote hot-path. nil means the survey is not
+// registered — the vote handler treats that as open mode.
+func (s *Store) GetAllowedAnswers(surveyID string) (map[string]bool, error) {
+	answers, err := s.GetSurveyAnswers(surveyID)
+	if err != nil || answers == nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(answers))
+	for _, a := range answers {
+		out[a] = true
 	}
 	return out, nil
 }

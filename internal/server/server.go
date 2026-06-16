@@ -22,7 +22,7 @@ type Config struct {
 	BlogURL    string
 }
 
-//go:embed thanks.html result.html style.css
+//go:embed thanks.html result.html landing.html style.css ogimage.png
 var staticFS embed.FS
 
 // Route patterns. Edit here if the URL shape ever changes — the rest of the
@@ -30,12 +30,15 @@ var staticFS embed.FS
 // patterns use Go 1.22 ServeMux wildcards; r.PathValue("id") and
 // r.PathValue("answer") pull the segments inside the handler.
 const (
-	routeVote       = "/{id}/{answer}"        // primary, short form (e.g. q.ssp.sh/init/awesome)
-	routeVoteLegacy = "/survey/{id}/{answer}" // kept so old newsletter links keep working
-	routeResult     = "/result/{id}"          // server-rendered tally page
-	routeThanks     = "/thanks"
-	routeHealth     = "/healthz"
-	routeStyle      = "/style.css" // shared CSS for thanks.html + result.html
+	routeVote          = "/{id}/{answer}"        // primary, short form (e.g. q.ssp.sh/init/awesome)
+	routeVoteLegacy    = "/survey/{id}/{answer}" // kept so old newsletter links keep working
+	routeResult        = "/result/{id}"          // server-rendered tally page
+	routeLanding       = "/{id}"                 // landing page with answer buttons for registered surveys
+	routeLandingLegacy = "/survey/{id}"          // alias matching the explicit /survey/ form the user might type
+	routeThanks        = "/thanks"
+	routeHealth        = "/healthz"
+	routeStyle         = "/style.css"    // shared CSS for thanks.html + result.html
+	routeOGImage       = "/og-image.png" // generic social-card image for result.html
 )
 
 // slugRe gates both survey_id and answer. Lowercase alnum, dash, underscore,
@@ -92,12 +95,14 @@ func isBotUA(ua string) bool {
 }
 
 type Server struct {
-	cfg    Config
-	store  *store.Store
-	salt   *voter.Salt
-	thanks *template.Template
-	result *template.Template
-	css    []byte // cached at startup, served from routeStyle
+	cfg     Config
+	store   *store.Store
+	salt    *voter.Salt
+	thanks  *template.Template
+	result  *template.Template
+	landing *template.Template
+	css     []byte // cached at startup, served from routeStyle
+	ogImage []byte // cached at startup, served from routeOGImage
 }
 
 func New(cfg Config, st *store.Store) *Server {
@@ -105,13 +110,19 @@ func New(cfg Config, st *store.Store) *Server {
 	if err != nil {
 		panic("embedded style.css missing: " + err.Error())
 	}
+	ogImage, err := staticFS.ReadFile("ogimage.png")
+	if err != nil {
+		panic("embedded ogimage.png missing: " + err.Error())
+	}
 	return &Server{
-		cfg:    cfg,
-		store:  st,
-		salt:   voter.NewSalt(),
-		thanks: template.Must(template.ParseFS(staticFS, "thanks.html")),
-		result: template.Must(template.ParseFS(staticFS, "result.html")),
-		css:    css,
+		cfg:     cfg,
+		store:   st,
+		salt:    voter.NewSalt(),
+		thanks:  template.Must(template.ParseFS(staticFS, "thanks.html")),
+		result:  template.Must(template.ParseFS(staticFS, "result.html")),
+		landing: template.Must(template.ParseFS(staticFS, "landing.html")),
+		css:     css,
+		ogImage: ogImage,
 	}
 }
 
@@ -122,8 +133,11 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc(routeResult, s.handleResult)
 	mux.HandleFunc(routeVote, s.handleSurvey)
 	mux.HandleFunc(routeVoteLegacy, s.handleSurvey)
+	mux.HandleFunc(routeLanding, s.handleLanding)
+	mux.HandleFunc(routeLandingLegacy, s.handleLanding)
 	mux.HandleFunc(routeThanks, s.handleThanks)
 	mux.HandleFunc(routeStyle, s.handleStyle)
+	mux.HandleFunc(routeOGImage, s.handleOGImage)
 	mux.HandleFunc(routeHealth, func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -213,6 +227,22 @@ func (s *Server) handleStyle(w http.ResponseWriter, r *http.Request) {
 	w.Write(s.css)
 }
 
+func (s *Server) handleOGImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	// Long cache: this is a static asset that only changes on redeploy. Social
+	// scrapers (Twitter/FB/LinkedIn) cache aggressively anyway.
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Write(s.ogImage)
+}
+
 func (s *Server) handleThanks(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		BlogURL  string
@@ -237,10 +267,14 @@ type tallyRow struct {
 }
 
 type resultPageData struct {
-	SurveyID   string
-	Tallies    []tallyRow
-	TotalVotes int
-	BlogURL    string
+	SurveyID      string
+	Tallies       []tallyRow
+	TotalVotes    int
+	BlogURL       string
+	PageURL       string // absolute URL of this result page, for og:url
+	OGImageURL    string // absolute URL of the social-card image, for og:image
+	OGTitle       string
+	OGDescription string
 }
 
 func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
@@ -282,17 +316,117 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 		view[i] = tallyRow{Answer: t.Answer, Clicks: t.Clicks, PercentOfMax: pct}
 	}
 
+	base := publicBaseURL(r)
 	data := resultPageData{
-		SurveyID:   surveyID,
-		Tallies:    view,
-		TotalVotes: total,
-		BlogURL:    s.cfg.BlogURL,
+		SurveyID:      surveyID,
+		Tallies:       view,
+		TotalVotes:    total,
+		BlogURL:       s.cfg.BlogURL,
+		PageURL:       base + r.URL.Path,
+		OGImageURL:    base + routeOGImage,
+		OGTitle:       "Survey results: " + surveyID,
+		OGDescription: "Live tally of newsletter reader ratings for " + surveyID + ".",
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := s.result.Execute(w, data); err != nil {
 		log.Printf("result template: %v", err)
 	}
+}
+
+// landingAnswer is one button on the landing page — the slug (URL segment
+// part) and a human-friendly Label derived from the slug.
+type landingAnswer struct {
+	Slug  string
+	Label string
+}
+
+type landingPageData struct {
+	SurveyID      string
+	Answers       []landingAnswer
+	PageURL       string
+	OGImageURL    string
+	OGTitle       string
+	OGDescription string
+}
+
+// handleLanding serves /{id} and /survey/{id} — the public vote landing page
+// that lists the registered answer slugs as buttons. Only renders for
+// surveys that have a row in the `surveys` table; unregistered (open-mode)
+// surveys 404 so we don't accidentally expose a wildcard "anyone can guess
+// a slug" landing.
+func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	surveyID := r.PathValue("id")
+	if !slugRe.MatchString(surveyID) {
+		http.NotFound(w, r)
+		return
+	}
+
+	answers, err := s.store.GetSurveyAnswers(surveyID)
+	if err != nil {
+		log.Printf("survey answers lookup: survey_id=%s err=%v", surveyID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if answers == nil {
+		// Unregistered survey — no landing page to show.
+		http.NotFound(w, r)
+		return
+	}
+
+	links := make([]landingAnswer, len(answers))
+	for i, a := range answers {
+		links[i] = landingAnswer{Slug: a, Label: titleAnswer(a)}
+	}
+
+	base := publicBaseURL(r)
+	data := landingPageData{
+		SurveyID:      surveyID,
+		Answers:       links,
+		PageURL:       base + r.URL.Path,
+		OGImageURL:    base + routeOGImage,
+		OGTitle:       "Vote: " + surveyID,
+		OGDescription: "One click to record your rating for newsletter " + surveyID + ".",
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := s.landing.Execute(w, data); err != nil {
+		log.Printf("landing template: %v", err)
+	}
+}
+
+// titleAnswer turns a slug like "not-sure" into a display label "Not Sure".
+// Validation upstream guarantees slugs are lower-case ASCII so byte-indexing
+// the first rune of each part is safe.
+func titleAnswer(slug string) string {
+	parts := strings.Split(slug, "-")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// publicBaseURL returns the scheme+host that an external client used to reach
+// us — needed for absolute URLs in og: tags (social scrapers reject relative
+// URLs). Trusts X-Forwarded-Proto from the upstream reverse proxy; defaults to
+// https since this app only ships behind TLS termination in real deployments.
+func publicBaseURL(r *http.Request) string {
+	scheme := "https"
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		scheme = p
+	}
+	return scheme + "://" + r.Host
 }
 
 // clientIP picks the first hop from X-Forwarded-For (set by Caddy) and falls
