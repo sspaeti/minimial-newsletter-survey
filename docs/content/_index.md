@@ -17,7 +17,7 @@ toc: false
 </div>
 <br>
 <div class="hx-mb-6">
-{{< hextra/hero-button text="Get Started" link="docs/install" >}}
+{{< hextra/hero-button text="Overview and Philosophy" link="docs" >}}
 </div>
 <br>
 <div class="hx-mt-6"></div>
@@ -86,7 +86,14 @@ _Rendered poll, but you can also just use Markdown links_
   {{< card link="docs/privacy" title="Privacy" subtitle="How the voter hash and the daily salt rotation work." >}}
 {{< /cards >}}
 
+
 <br>
+
+<div class="hx-mb-6">
+{{< hextra/hero-button text="Getting Started: Install" link="docs/install" >}}
+</div>
+<br>
+
 
 <div class="hx-mt-12 hx-mb-8">
 <h2 class="hx-text-4xl hx-font-bold hx-tracking-tight hx-text-gray-900 dark:hx-text-gray-50">Links:</h2>
